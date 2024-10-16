@@ -1,5 +1,6 @@
 release:
-	VERSION=$$(./bump.sh $(TYPE)) && echo "Releasing $$VERSION"
+	VERSION=$$(./bump.sh $(TYPE)) && \
+		gh release create v$$VERSION --generate-notes
 
 patch:
 	$(MAKE) release TYPE=patch
