@@ -1,3 +1,4 @@
+# shellcheck disable=all
 # Pure
 # by Sindre Sorhus
 # https://github.com/sindresorhus/pure
@@ -22,6 +23,16 @@
 # \e8   => restore cursor position
 # \e[K  => clears everything after the cursor on the current line
 # \e[2K => clear everything on the current line
+
+prompt_aws_vault_segment() {
+	if [[ -n $AWS_VAULT ]]; then
+		if [ "$AWS_VAULT" = "$AWS_VAULT_PL_DEFAULT_PROFILE" ]; then
+			echo -n "$AWS_VAULT_PL_CHAR"
+		else
+			echo -n "$AWS_VAULT_PL_CHAR $AWS_VAULT"
+		fi
+	fi
+}
 
 
 # Turns seconds into human readable time.
@@ -60,8 +71,8 @@ prompt_pure_set_title() {
 	(( ${+EMACS} || ${+INSIDE_EMACS} )) && return
 
 	case $TTY in
-		# Don't set title over serial console.
-		/dev/ttyS[0-9]*) return;;
+			# Don't set title over serial console.
+		/dev/ttyS[0-9]*) return ;;
 	esac
 
 	# Show hostname if connected via SSH.
@@ -73,8 +84,8 @@ prompt_pure_set_title() {
 
 	local -a opts
 	case $1 in
-		expand-prompt) opts=(-P);;
-		ignore-escape) opts=(-r);;
+		expand-prompt) opts=(-P) ;;
+		ignore-escape) opts=(-r) ;;
 	esac
 
 	# Set title atomically in one print statement so that it works when XTRACE is enabled.
@@ -234,6 +245,13 @@ prompt_pure_precmd() {
 		if [[ -n $IN_NIX_SHELL ]]; then
 			psvar[12]="${name:-nix-shell}"
 		fi
+	fi
+
+	# Check for active AWS-VAULT profile and set psvar[13]
+	psvar[13]=
+	aws_vault_profile=$(prompt_aws_vault_segment)
+	if [[ -n $aws_vault_profile ]]; then
+			psvar[13]="${aws_vault_profile//[$'\t\r\n']}"
 	fi
 
 	# Make sure VIM prompt is reset.
@@ -504,7 +522,7 @@ prompt_pure_async_callback() {
 	local do_render=0
 
 	case $job in
-		\[async])
+	\[async])
 			# Handle all the errors that could indicate a crashed
 			# async worker. See zsh-async documentation for the
 			# definition of the exit codes.
@@ -834,6 +852,7 @@ prompt_pure_setup() {
 		user                 242
 		user:root            default
 		virtualenv           242
+		aws_vault            cyan
 	)
 	prompt_pure_colors=("${(@kv)prompt_pure_colors_default}")
 
@@ -852,6 +871,7 @@ prompt_pure_setup() {
 
 	# If a virtualenv is activated, display it in grey.
 	PROMPT='%(12V.%F{$prompt_pure_colors[virtualenv]}%12v%f .)'
+	PROMPT+='%(13V.%F{$prompt_pure_colors[aws_vault]}%13v%f .)'
 
 	# Prompt turns red if the previous command didn't exit with 0.
 	local prompt_indicator='%(?.%F{$prompt_pure_colors[prompt:success]}.%F{$prompt_pure_colors[prompt:error]})${prompt_pure_state[prompt]}%f '
