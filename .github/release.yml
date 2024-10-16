@@ -1,0 +1,29 @@
+name: Build and Upload new artifact
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  brew-release:
+    runs-on: ubuntu-latest
+    name: realease-new-version
+    steps:
+      - name: Create a new release to my tap
+        uses: Justintime50/homebrew-releaser@v1.0.0
+        with:
+          homebrew_owner: sijanc147
+          homebrew_tap: homebrew-formulas
+          formula_folder: Formula
+          github_token: ${{ secrets.PERSONAL_ACCESS_TOKEN}}
+          commit_owner: homebrew-releaser
+          commit_email: homebrew-releaser@ghaction.com
+          depends_on: |
+            "zsh" => :test
+            "zsh-async"
+          install: 'zsh_function.install "pure.zsh" => "prompt_pure_setup"'
+          test: |
+            zsh_command = "setopt prompt_subst; autoload -U promptinit; promptinit && prompt -p pure"
+            assert_match "❯", shell_output("zsh -c '#{zsh_command}'")
+          skip_commit: true
+          debug: true
