@@ -22,9 +22,8 @@ jobs:
             "zsh" => :test
             "zsh-async"
           install: 'zsh_function.install "pure.zsh" => "prompt_pure_setup"'
-          test: >
-            zsh_command = "setopt prompt_subst; autoload -U promptinit; promptinit && prompt -p pure"
-
-            assert_match "❯", shell_output("zsh -c '#{zsh_command}'")
+          test: >2-
+                zsh_command = "setopt prompt_subst; autoload -U promptinit; promptinit && prompt -p pure"
+                assert_match "❯", shell_output("zsh -c '#{zsh_command}'")
           skip_commit: true
           debug: true
