@@ -27,9 +27,9 @@
 prompt_aws_vault_segment() {
 	if [[ -n $AWS_VAULT ]]; then
 		if [ "$AWS_VAULT" = "$AWS_VAULT_PL_DEFAULT_PROFILE" ]; then
-			echo -n "$AWS_VAULT_PL_CHAR"
+			echo -n "${AWS_VAULT_PL_CHAR:-$'\UF01A7'}"
 		else
-			echo -n "$AWS_VAULT_PL_CHAR $AWS_VAULT"
+			echo -n "${AWS_VAULT_PL_CHAR:-$'\UF01A7'} $AWS_VAULT"
 		fi
 	fi
 }
@@ -144,7 +144,8 @@ prompt_pure_preprompt_render() {
 
 	# Suspended jobs in background.
 	if ((${(M)#jobstates:#suspended:*} != 0)); then
-		preprompt_parts+='%F{$prompt_pure_colors[suspended_jobs]}✦'
+		preprompt_parts+='%F{$prompt_pure_colors[suspended_jobs]}'
+		preprompt_parts+=$'\UF41C'
 	fi
 
 	# Username and machine, if applicable.
@@ -251,7 +252,7 @@ prompt_pure_precmd() {
 	psvar[13]=
 	aws_vault_profile=$(prompt_aws_vault_segment)
 	if [[ -n $aws_vault_profile ]]; then
-			psvar[13]="${aws_vault_profile//[$'\t\r\n']}"
+		psvar[13]="${aws_vault_profile//[$'\t\r\n']}"
 	fi
 
 	# Make sure VIM prompt is reset.
@@ -852,7 +853,7 @@ prompt_pure_setup() {
 		user                 242
 		user:root            default
 		virtualenv           242
-		aws_vault            cyan
+		aws_vault            208
 	)
 	prompt_pure_colors=("${(@kv)prompt_pure_colors_default}")
 
