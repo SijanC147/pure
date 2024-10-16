@@ -30,7 +30,7 @@ function bump_version() {
 
   git add package.json &>/dev/null
   git commit -m "${bump_type^^} Bump version to ${new_version}" &>/dev/null
-  # git push origin main &>/dev/null
+  git push origin main &>/dev/null
 
   echo -n "$new_version"
 }
