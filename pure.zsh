@@ -888,7 +888,7 @@ prompt_pure_setup() {
 	# If a virtualenv is activated, display it in grey.
 	PROMPT='%(12V.%F{$prompt_pure_colors[virtualenv]}%12v%f .)'
 	PROMPT+='%(13V.%F{$prompt_pure_colors[aws_vault]}%13v%f .)'
-	PROMPT+='%(14V.%F{$prompt_pure_colors[zsh_autofn]}%13v%f .)'
+	PROMPT+='%(14V.%F{$prompt_pure_colors[zsh_autofn]}%14v%f .)'
 
 	# Prompt turns red if the previous command didn't exit with 0.
 	local prompt_indicator='%(?.%F{$prompt_pure_colors[prompt:success]}.%F{$prompt_pure_colors[prompt:error]})${prompt_pure_state[prompt]}%f '
