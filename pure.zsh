@@ -24,6 +24,13 @@
 # \e[K  => clears everything after the cursor on the current line
 # \e[2K => clear everything on the current line
 
+prompt_zsh_autofn_segment() {
+	if [[ -n "$ZSH_AUTOFN" ]]; then
+		local auto_name=$(basename $(dirname $ZSH_AUTOFN))
+		echo -n "${ZSH_AUTOFN_CHAR:-$'\UF01A7'} $auto_name"
+	fi
+}
+
 prompt_aws_vault_segment() {
 	if [[ -n $AWS_VAULT ]]; then
 		if [ "$AWS_VAULT" = "$AWS_VAULT_PL_DEFAULT_PROFILE" ]; then
@@ -253,6 +260,12 @@ prompt_pure_precmd() {
 	aws_vault_profile=$(prompt_aws_vault_segment)
 	if [[ -n $aws_vault_profile ]]; then
 		psvar[13]="${aws_vault_profile//[$'\t\r\n']}"
+	fi
+
+	psvar[14]=
+	zsh_autofn_profile=$(prompt_zsh_autofn_segment)
+	if [[ -n $zsh_autofn_profile ]]; then
+		psvar[14]="${zsh_autofn_profile//[$'\t\r\n']}"
 	fi
 
 	# Make sure VIM prompt is reset.
@@ -835,6 +848,7 @@ prompt_pure_setup() {
 	autoload -Uz +X add-zle-hook-widget 2>/dev/null
 
 	# Set the colors.
+	# https://www.ditig.com/publications/256-colors-cheat-sheet
 	typeset -gA prompt_pure_colors_default prompt_pure_colors
 	prompt_pure_colors_default=(
 		execution_time       yellow
@@ -854,6 +868,7 @@ prompt_pure_setup() {
 		user:root            default
 		virtualenv           242
 		aws_vault            208
+		zsh_autofn 	         39
 	)
 	prompt_pure_colors=("${(@kv)prompt_pure_colors_default}")
 
@@ -873,6 +888,7 @@ prompt_pure_setup() {
 	# If a virtualenv is activated, display it in grey.
 	PROMPT='%(12V.%F{$prompt_pure_colors[virtualenv]}%12v%f .)'
 	PROMPT+='%(13V.%F{$prompt_pure_colors[aws_vault]}%13v%f .)'
+	PROMPT+='%(14V.%F{$prompt_pure_colors[zsh_autofn]}%13v%f .)'
 
 	# Prompt turns red if the previous command didn't exit with 0.
 	local prompt_indicator='%(?.%F{$prompt_pure_colors[prompt:success]}.%F{$prompt_pure_colors[prompt:error]})${prompt_pure_state[prompt]}%f '
