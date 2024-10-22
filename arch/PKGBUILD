@@ -1,3 +1,4 @@
+# shellcheck disable=all
 # Author: Sindre Sorhus
 # Maintainer: Pat Brisbin <pbrisbin@gmail.com>
 # Contributor: Emil Falk <emph@emph.se>
