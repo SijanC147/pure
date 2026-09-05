@@ -1,0 +1,63 @@
+name: Validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Pure validation (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '11.25.0'
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y zsh
+      - run: pnpm --ignore-workspace install --frozen-lockfile --ignore-scripts
+      - run: npm run test:unit && npx tsc --noEmit
+      - run: npm run test:pty
+      - run: npm run test:package
+
+  minimum-zsh:
+    name: Pure validation (zsh 5.2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build pinned minimum supported zsh
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses-dev
+          cd "$RUNNER_TEMP"
+          curl --fail --location --silent --show-error https://www.zsh.org/pub/old/zsh-5.2.tar.xz -o zsh-5.2.tar.xz
+          echo 'f17916320ffaa844bbd7ce48ceeb5945fc5f3eff64b149b4229bbfbdf3795a9d  zsh-5.2.tar.xz' | sha256sum --check
+          tar -xf zsh-5.2.tar.xz
+          cd zsh-5.2
+          ./configure --prefix="$RUNNER_TEMP/zsh-minimum"
+          make -j2
+          make install.bin install.modules install.fns
+          echo "$RUNNER_TEMP/zsh-minimum/bin" >> "$GITHUB_PATH"
+      - run: zsh --version && npm run test:unit && npm run test:pty && npm run test:package
