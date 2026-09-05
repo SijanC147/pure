@@ -26,6 +26,19 @@ assert_equal 1 "$psvar[13]" 'username flag retained'
 assert_equal feature "$psvar[14]" 'upstream Git branch retained'
 assert_equal rebase "$psvar[16]" 'upstream Git action retained'
 assert_equal venv "$psvar[20]" 'upstream environment retained'
+setopt GLOB_SUBST
+AWS_VAULT_PL_DEFAULT_PROFILE='*'
+prompt_pure_precmd
+assert_equal 'AWS production' "$psvar[90]" 'default profile equality remains literal with GLOB_SUBST'
+unsetopt GLOB_SUBST
+AWS_VAULT_PL_DEFAULT_PROFILE=default
+ZSH_AUTOFN=/foo
+prompt_pure_precmd
+assert_equal 'AUTO /' "$psvar[91]" 'root parent directory remains visible'
+ZSH_AUTOFN=/
+prompt_pure_precmd
+assert_equal 'AUTO /' "$psvar[91]" 'root path remains visible'
+ZSH_AUTOFN='/tmp/project with spaces/.autofn.zsh'
 AWS_VAULT=default
 prompt_pure_precmd
 assert_equal AWS "$psvar[90]" 'default profile only shows symbol'

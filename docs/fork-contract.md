@@ -4,8 +4,8 @@ The fork integrates upstream `89c9e30` with the existing fork `ba0c0c7` using a 
 
 | Behavior | Contract |
 | --- | --- |
-| AWS Vault | Nonempty `AWS_VAULT` renders on the lower line in color 208 (`:prompt:pure:aws_vault`); default-profile equality with `AWS_VAULT_PL_DEFAULT_PROFILE` shows the symbol alone, otherwise symbol plus profile. |
-| autofn | Nonempty `ZSH_AUTOFN` renders its parent-directory basename on the lower line in color 39 (`:prompt:pure:zsh_autofn`); spaces remain intact. |
+| AWS Vault | Nonempty `AWS_VAULT` renders on the lower line in color 208 (`:prompt:pure:aws_vault`); literal default-profile equality (including under `GLOB_SUBST`) with `AWS_VAULT_PL_DEFAULT_PROFILE` shows the symbol alone, otherwise symbol plus profile. |
+| autofn | Nonempty `ZSH_AUTOFN` renders its parent-directory basename on the lower line in color 39 (`:prompt:pure:zsh_autofn`); spaces remain intact and a root parent displays `/`. |
 | Symbols | AWS/autofn use `AWS_VAULT_PL_CHAR` / `ZSH_AUTOFN_CHAR`, with U+F01A7 used for unset or empty values, preserving historical behavior. |
 | Text | AWS/autofn profile, directory, and symbol text are literal: percent sequences, dollar expressions, backticks, and backslashes do not execute or become prompt formatting. Control characters are removed. |
 | Allocation | `psvar[90]` is AWS; `psvar[91]` is autofn. Both refresh on every render, clear on removal, and participate in redraw fingerprints. |

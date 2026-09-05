@@ -31,7 +31,7 @@ prompt_aws_vault_segment() {
 	local segment=
 	if [[ -n $AWS_VAULT ]]; then
 		segment=${AWS_VAULT_PL_CHAR:-$'\UF01A7'}
-		[[ $AWS_VAULT != $AWS_VAULT_PL_DEFAULT_PROFILE ]] && segment+=" $AWS_VAULT"
+		[[ $AWS_VAULT != "$AWS_VAULT_PL_DEFAULT_PROFILE" ]] && segment+=" $AWS_VAULT"
 	fi
 	print -rn -- "${segment//[[:cntrl:]]/}"
 }
@@ -42,7 +42,9 @@ prompt_zsh_autofn_segment() {
 	if [[ -n $ZSH_AUTOFN ]]; then
 		# zsh path modifiers preserve spaces without external dirname/basename.
 		local symbol=${ZSH_AUTOFN_CHAR:-$'\UF01A7'}
-		segment="$symbol ${ZSH_AUTOFN:h:t}"
+		local parent_name=${ZSH_AUTOFN:h:t}
+		# The tail modifier yields empty for /; basename dirname preserves /.
+		segment="$symbol ${parent_name:-/}"
 	fi
 	print -rn -- "${segment//[[:cntrl:]]/}"
 }
