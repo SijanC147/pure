@@ -1,3 +1,5 @@
+.DEFAULT_GOAL := help
+
 .PHONY: release prepare-release publish patch minor major test-release-safety help
 
 # Legacy aliases now prepare a PR; they never publish a release.

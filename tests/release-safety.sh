@@ -55,6 +55,9 @@ printf 'npm <%s> <%s>\n' "$1" "$2" >>"$TEST_LOG"
 MOCK
 chmod +x "$fixture_root/bin/"*
 export PATH="$fixture_root/bin:$PATH"
+# Default make is informational and cannot call the release helper.
+make -f "$source_root/Makefile" >"$fixture_root/default-help"
+[[ ! -s "$TEST_LOG" ]]
 count=0
 setup() {
   count=$((count + 1))

@@ -24,6 +24,7 @@ pnpm --ignore-workspace install --frozen-lockfile --ignore-scripts
 npm run test:unit && npx tsc --noEmit
 npm run test:pty
 npm run test:package
+npm run test:release
 ```
 
 `--ignore-workspace` prevents an enclosing user workspace from capturing the checkout's development dependencies. Use an installed UTF-8 locale (macOS: `LC_ALL=en_US.UTF-8`). Unset malformed inherited `GIT_CONFIG_COUNT` for validation if the launcher supplies a count without the matching Git configuration keys; no persistent Git configuration change is needed.

@@ -13,6 +13,7 @@ jobs:
   validate:
     name: Pure validation (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -34,10 +35,12 @@ jobs:
       - run: npm run test:unit && npx tsc --noEmit
       - run: npm run test:pty
       - run: npm run test:package
+      - run: npm run test:release
 
   minimum-zsh:
     name: Pure validation (zsh 5.2)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -60,4 +63,4 @@ jobs:
           make -j2
           make install.bin install.modules install.fns
           echo "$RUNNER_TEMP/zsh-minimum/bin" >> "$GITHUB_PATH"
-      - run: zsh --version && npm run test:unit && npm run test:pty && npm run test:package
+      - run: zsh --version && npm run test:unit && npm run test:pty && npm run test:package && npm run test:release

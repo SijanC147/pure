@@ -26,7 +26,8 @@
 		"test:unit": "zsh tests/test.zsh",
 		"test:pty": "python3 tests/fork-pty.py",
 		"test:package": "python3 tests/fork-package.py",
-		"package:pack": "node scripts/pack.mts"
+		"package:pack": "node scripts/pack.mts",
+		"test:release": "bash tests/release-safety.sh"
 	},
 	"files": [
 		"pure.zsh",
