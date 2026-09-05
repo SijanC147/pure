@@ -2,6 +2,9 @@
 
 set -euo pipefail
 
+# Linux runners need an explicit default; macOS normally exports TMPDIR.
+export TMPDIR=${TMPDIR:-/tmp}
+
 cd -- "${0:A:h}/.."
 
 fpath=($PWD $fpath)

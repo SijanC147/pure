@@ -59,7 +59,8 @@ jobs:
           echo 'f17916320ffaa844bbd7ce48ceeb5945fc5f3eff64b149b4229bbfbdf3795a9d  zsh-5.2.tar.xz' | sha256sum --check
           tar -xf zsh-5.2.tar.xz
           cd zsh-5.2
-          ./configure --prefix="$RUNNER_TEMP/zsh-minimum"
+          # Hosted build steps have no controlling tty; Linux supports tcsetpgrp.
+          ./configure --with-tcsetpgrp --prefix="$RUNNER_TEMP/zsh-minimum"
           make -j2
           make install.bin install.modules install.fns
           echo "$RUNNER_TEMP/zsh-minimum/bin" >> "$GITHUB_PATH"
