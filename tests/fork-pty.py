@@ -14,6 +14,7 @@ import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -27,7 +28,9 @@ with tempfile.TemporaryDirectory(prefix='pure-pty-') as directory:
     repo.mkdir()
     env = {key: value for key, value in os.environ.items()
            if key != 'FPATH' and not key.startswith(('GIT_', 'AWS_', 'ZSH_', 'CONDA', 'VIRTUAL_ENV', 'PURE_', 'PROMPT_PURE'))}
-    env.update(HOME=str(home), ZDOTDIR=str(home), TERM='xterm-256color', LC_ALL='en_US.UTF-8')
+    # Respect the harness locale: Debian images commonly provide C.UTF-8 only.
+    locale_name = os.environ.get('LC_ALL') or ('en_US.UTF-8' if sys.platform == 'darwin' else 'C.UTF-8')
+    env.update(HOME=str(home), ZDOTDIR=str(home), TERM='xterm-256color', LC_ALL=locale_name)
     subprocess.run(['git', 'init', '-q', str(repo)], env=env, check=True)
     subprocess.run(['git', '-C', str(repo), 'checkout', '-qb', 'pty-branch'], env=env, check=True)
     subprocess.run(['git', '-C', str(repo), '-c', 'user.name=Pure tests', '-c', 'user.email=pure@example.invalid',
