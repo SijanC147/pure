@@ -1,0 +1,8 @@
+# Intentionally disable Pull sync for this repository only.
+# Upstream integration is owned by the private validated maintainer.
+# Pull skips same-branch rules; a valid config prevents default sync fallback.
+version: "1"
+rules:
+  - base: main
+    upstream: main
+    mergeMethod: none
