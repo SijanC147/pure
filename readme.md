@@ -33,6 +33,12 @@ npm install --global pure-prompt
 
 That's it. Skip to [Getting started](#getting-started).
 
+If `prompt -l` does not list `pure`, add this to your `.zshrc` before `promptinit`:
+
+```sh
+fpath+=("$(npm root -g)/pure-prompt")
+```
+
 ### [Homebrew](https://brew.sh)
 
 ```sh
@@ -80,9 +86,10 @@ prompt pure
 | **`PURE_GIT_DELAY_DIRTY_CHECK`** | Time in seconds to delay git dirty checking when `git status` takes > 5 seconds.               | `1800` seconds |
 | **`PURE_PROMPT_SYMBOL`**         | Defines the prompt symbol.                                                                     | `❯`            |
 | **`PURE_PROMPT_VICMD_SYMBOL`**   | Defines the prompt symbol used when the `vicmd` keymap is active (VI-mode).                    | `❮`            |
+| **`PURE_SUSPENDED_JOBS_SYMBOL`** | Defines the symbol that indicates that jobs are running in the background. Set to empty to disable. | `✦`            |
 | **`PURE_GIT_DOWN_ARROW`**        | Defines the git down arrow symbol.                                                             | `⇣`            |
 | **`PURE_GIT_UP_ARROW`**          | Defines the git up arrow symbol.                                                               | `⇡`            |
-| **`PURE_GIT_STASH_SYMBOL`**      | Defines the git stash symbol.                                                                  | `≡`            |
+| **`PURE_GIT_STASH_SYMBOL`**      | Defines the git stash symbol. Set to empty to disable.                                         | `≡`            |
 
 ## Zstyle options
 
@@ -94,9 +101,73 @@ You can set Pure to only `git fetch` the upstream branch of the current local br
 
 `zstyle :prompt:pure:git:fetch only_upstream yes`
 
+Node.js version display shows the current major `node` version when inside a directory tree containing a `package.json`. It is not enabled by default. You can enable it with:
+
+`zstyle :prompt:pure:environment:node_version show yes`
+
+You can change the symbol shown before the Node.js version (default `⬢`) with:
+
+`zstyle :prompt:pure:environment:node_version symbol ⬡`
+
 `nix-shell` integration adds the shell name to the prompt when used from within a nix shell. It is enabled by default, you can disable it with:
 
 `zstyle :prompt:pure:environment:nix-shell show no`
+
+Virtualenv integration shows the current Python virtualenv or Conda environment name. It is enabled by default, you can disable it with:
+
+`zstyle :prompt:pure:environment:virtualenv show no`
+
+Git integration is enabled by default, you can disable it with:
+
+`zstyle :prompt:pure:git show no`
+
+Detailed dirty indicators differentiate between unstaged (`*`), staged (`+`), and untracked (`?`) changes instead of showing a single `*`. It is not enabled by default. You can enable it with:
+
+`zstyle :prompt:pure:git:dirty detailed yes`
+
+Path separator dimming makes `/` characters in the path visually dimmer to help distinguish path components. It is not enabled by default. You can enable it with:
+
+`zstyle :prompt:pure:path:separator dim yes`
+
+Hostname display is enabled by default when in an SSH session or container. You can disable it while still showing the username with:
+
+`zstyle :prompt:pure:host show no`
+
+Automatic terminal title management can be disabled if you want to set your own tab or window titles:
+
+`zstyle :prompt:pure:title show no`
+
+## Customization
+
+Pure supports a hook function for adding custom content to the prompt. Define a function called `prompt_pure_precustom` in your `.zshrc` (after `prompt pure`) to set custom prefix and suffix segments on the preprompt line:
+
+- `psvar[22]` — Custom prefix, rendered before all built-in segments.
+- `psvar[23]` — Custom suffix, rendered after all built-in segments.
+
+The function is called each time the prompt renders (including async redraws), so avoid slow commands. For expensive operations, cache the result in a `precmd` hook and read the cached value in `prompt_pure_precustom`.
+
+```sh
+# .zshrc
+
+# Cache expensive calls in precmd (runs once per command, not on async redraws).
+my_kube_context=
+my_precmd() {
+	my_kube_context=$(kubectl config current-context 2>/dev/null)
+}
+add-zsh-hook precmd my_precmd
+
+prompt_pure_precustom() {
+	psvar[22]=$my_kube_context
+	psvar[23]=$(date +%H:%M)
+}
+```
+
+The colors can be customized with `zstyle`:
+
+```sh
+zstyle :prompt:pure:custom:prefix color cyan
+zstyle :prompt:pure:custom:suffix color yellow
+```
 
 ## Colors
 
@@ -106,6 +177,8 @@ As explained in ZSH's [manual](http://zsh.sourceforge.net/Doc/Release/Zsh-Line-E
 - `#` followed by an RGB triplet in hexadecimal format, for example `#424242`. Only if your terminal supports 24-bit colors (true color) or when the [`zsh/nearcolor` module](http://zsh.sourceforge.net/Doc/Release/Zsh-Modules.html#The-zsh_002fnearcolor-Module) is loaded.
 
 Colors can be changed by using [`zstyle`](http://zsh.sourceforge.net/Doc/Release/Zsh-Modules.html#The-zsh_002fzutil-Module) with a pattern of the form `:prompt:pure:$color_name` and style `color`. The color names, their default, and what part they affect are:
+- `custom:prefix` (242) - Custom prefix set via `prompt_pure_precustom`.
+- `custom:suffix` (242) - Custom suffix set via `prompt_pure_precustom`.
 - `execution_time` (yellow) - The execution time of the last command when exceeding `PURE_CMD_MAX_EXEC_TIME`.
 - `git:arrow` (cyan) - For `PURE_GIT_UP_ARROW` and `PURE_GIT_DOWN_ARROW`.
 - `git:stash` (cyan) - For `PURE_GIT_STASH_SYMBOL`.
@@ -114,11 +187,12 @@ Colors can be changed by using [`zstyle`](http://zsh.sourceforge.net/Doc/Release
 - `git:action` (yellow) - The current action in progress (cherry-pick, rebase, etc.) when in a Git repository.
 - `git:dirty` (218) - The asterisk showing the branch is dirty.
 - `host` (242) - The hostname when on a remote machine.
+- `node_version` (green) - The current major Node.js version in directories with `package.json`.
 - `path` (blue) - The current path, for example, `PWD`.
 - `prompt:error` (red) - The `PURE_PROMPT_SYMBOL` when the previous command has *failed*.
 - `prompt:success` (magenta) - The `PURE_PROMPT_SYMBOL` when the previous command has *succeeded*.
 - `prompt:continuation` (242) - The color for showing the state of the parser in the continuation prompt (PS2). It's the pink part in [this screenshot](https://user-images.githubusercontent.com/147409/70068574-ebc74800-15f8-11ea-84c0-8b94a4b57ff4.png), it appears in the same spot as `virtualenv`. You could for example matching both colors so that Pure has a uniform look.
-- `suspended_jobs` (red) - The `✦` symbol indicates that jobs are running in the background.
+- `suspended_jobs` (red) - The `PURE_SUSPENDED_JOBS_SYMBOL`.
 - `user` (242) - The username when on remote machine.
 - `user:root` (default) - The username when the user is root.
 - `virtualenv` (242) - The name of the Python `virtualenv` when in use.
@@ -126,22 +200,30 @@ Colors can be changed by using [`zstyle`](http://zsh.sourceforge.net/Doc/Release
 The following diagram shows where each color is applied on the prompt:
 
 ```
-┌────────────────────────────────────────────────────── user
-│      ┌─────────────────────────────────────────────── host
-│      │           ┌─────────────────────────────────── path
-│      │           │          ┌──────────────────────── git:branch
-│      │           │          │     ┌────────────────── git:dirty
-│      │           │          │     │ ┌──────────────── git:action
-│      │           │          │     │ │        ┌─────── git:arrow
-│      │           │          │     │ │        │ ┌───── git:stash
-│      │           │          │     │ │        │ │ ┌─── execution_time
-│      │           │          │     │ │        │ │ │
-zaphod@heartofgold ~/dev/pure master* rebase-i ⇡ ≡ 42s
+┌──────────────────────────────────────────────────────────────────────── custom:prefix
+│      ┌─────────────────────────────────────────────────────────────────── suspended_jobs
+│      │ ┌───────────────────────────────────────────────────────────────── user
+│      │ │      ┌────────────────────────────────────────────────────────── host
+│      │ │      │           ┌────────────────────────────────────────────── path
+│      │ │      │           │          ┌─────────────────────────────────── git:branch
+│      │ │      │           │          │   ┌────────────────────────────── git:dirty
+│      │ │      │           │          │   │ ┌──────────────────────────── git:action
+│      │ │      │           │          │   │ │        ┌─────────────────── git:arrow
+│      │ │      │           │          │   │ │        │ ┌───────────────── git:stash
+│      │ │      │           │          │   │ │        │ │ ┌─────────────── node_version
+│      │ │      │           │          │   │ │        │ │ │   ┌─────────── execution_time
+│      │ │      │           │          │   │ │        │ │ │   │   ┌────── custom:suffix
+│      │ │      │           │          │   │ │        │ │ │   │   │
+prefix ✦ zaphod@heartofgold ~/dev/pure main* rebase-i ⇡ ≡ ⬢22 42s suffix
 venv ❯
 │    │
-│    └───────────────────────────────────────────────── prompt
-└────────────────────────────────────────────────────── virtualenv (or prompt:continuation)
+│    └───────────────────────────────────────────────────────────────────── prompt
+└────────────────────────────────────────────────────────────────────────── virtualenv (or prompt:continuation)
 ```
+
+### Preview
+
+Run `prompt_pure_preview` to display a sample prompt with all components rendered in their current colors. This is useful for testing color customizations.
 
 ### RGB colors
 
@@ -185,6 +267,18 @@ The [Tomorrow Night Eighties](https://github.com/chriskempson/tomorrow-theme) th
 *Just make sure you have anti-aliasing enabled in your terminal.*
 
 To have commands colorized as seen in the screenshot, install [zsh-syntax-highlighting](https://github.com/zsh-users/zsh-syntax-highlighting).
+
+### AI coding agents
+
+Most AI coding agents (Claude Code, Codex, …) run commands in a non-interactive shell where Pure's prompt never renders, so its git work never runs there anyway. Agents that render the prompt in an interactive terminal do run it, but you can skip it since `git fetch` can stall in a sandbox and no human sees the prompt. You can gate git integration on the agent marker environment variables in your `.zshrc`:
+
+```zsh
+# Just an example. Add whichever markers apply to the agents you use.
+# Pull requests to expand this list will not be accepted.
+if [[ -n $AI_AGENT$CLAUDECODE$CURSOR_AGENT$GEMINI_CLI$OPENCODE ]]; then
+	zstyle :prompt:pure:git show no
+fi
+```
 
 ## Integration
 
@@ -236,7 +330,13 @@ See the [ZI wiki](https://wiki.zshell.dev/community/gallery/collection/themes#th
 
 ## FAQ
 
-There are currently no FAQs.
+### Prompt is corrupted when using tab completion
+
+If the prompt displays incorrectly during tab completion (ghost characters, misaligned cursor), your shell is likely missing a UTF-8 locale. Pure uses Unicode characters (like `❯`) that require UTF-8 to calculate display width correctly. Add this to your `.zshrc`:
+
+```sh
+export LANG=en_US.UTF-8
+```
 
 See [FAQ Archive](https://github.com/sindresorhus/pure/wiki/FAQ-Archive) for previous FAQs.
 

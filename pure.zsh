@@ -1,4 +1,3 @@
-# shellcheck disable=all
 # Pure
 # by Sindre Sorhus
 # https://github.com/sindresorhus/pure
@@ -24,23 +23,31 @@
 # \e[K  => clears everything after the cursor on the current line
 # \e[2K => clear everything on the current line
 
-prompt_zsh_autofn_segment() {
-	if [[ -n "$ZSH_AUTOFN" ]]; then
-		local auto_name=$(basename $(dirname $ZSH_AUTOFN))
-		echo -n "${ZSH_AUTOFN_CHAR:-$'\UF01A7'} $auto_name"
-	fi
-}
 
+# Fork environment segments use literal psvar values: percent sequences and shell
+# metacharacters are display text, and terminal control characters are removed.
 prompt_aws_vault_segment() {
+	setopt localoptions noshwordsplit
+	local segment=
 	if [[ -n $AWS_VAULT ]]; then
-		if [ "$AWS_VAULT" = "$AWS_VAULT_PL_DEFAULT_PROFILE" ]; then
-			echo -n "${AWS_VAULT_PL_CHAR:-$'\UF01A7'}"
-		else
-			echo -n "${AWS_VAULT_PL_CHAR:-$'\UF01A7'} $AWS_VAULT"
-		fi
+		segment=${AWS_VAULT_PL_CHAR:-$'\UF01A7'}
+		[[ $AWS_VAULT != "$AWS_VAULT_PL_DEFAULT_PROFILE" ]] && segment+=" $AWS_VAULT"
 	fi
+	print -rn -- "${segment//[[:cntrl:]]/}"
 }
 
+prompt_zsh_autofn_segment() {
+	setopt localoptions noshwordsplit
+	local segment=
+	if [[ -n $ZSH_AUTOFN ]]; then
+		# zsh path modifiers preserve spaces without external dirname/basename.
+		local symbol=${ZSH_AUTOFN_CHAR:-$'\UF01A7'}
+		local parent_name=${ZSH_AUTOFN:h:t}
+		# The tail modifier yields empty for /; basename dirname preserves /.
+		segment="$symbol ${parent_name:-/}"
+	fi
+	print -rn -- "${segment//[[:cntrl:]]/}"
+}
 
 # Turns seconds into human readable time.
 # 165392 => 1d 21h 56m 32s
@@ -74,25 +81,28 @@ prompt_pure_check_cmd_exec_time() {
 prompt_pure_set_title() {
 	setopt localoptions noshwordsplit
 
+	# Allow disabling title management.
+	zstyle -T ":prompt:pure:title" show || return
+
 	# Emacs terminal does not support settings the title.
 	(( ${+EMACS} || ${+INSIDE_EMACS} )) && return
 
 	case $TTY in
-			# Don't set title over serial console.
-		/dev/ttyS[0-9]*) return ;;
+		# Don't set title over serial console.
+		/dev/ttyS[0-9]*) return;;
 	esac
 
-	# Show hostname if connected via SSH.
+	# Show hostname if connected via SSH and host display is enabled.
 	local hostname=
-	if [[ -n $prompt_pure_state[username] ]]; then
+	if (( psvar[13] )) && (( ${prompt_pure_state[show_host]:-1} )); then
 		# Expand in-place in case ignore-escape is used.
 		hostname="${(%):-(%m) }"
 	fi
 
 	local -a opts
 	case $1 in
-		expand-prompt) opts=(-P) ;;
-		ignore-escape) opts=(-r) ;;
+		expand-prompt) opts=(-P);;
+		ignore-escape) opts=(-r);;
 	esac
 
 	# Set title atomically in one print statement so that it works when XTRACE is enabled.
@@ -115,25 +125,56 @@ prompt_pure_preexec() {
 	# Shows the current directory and executed command in the title while a process is active.
 	prompt_pure_set_title 'ignore-escape' "$PWD:t: $2"
 
-	# Disallow Python virtualenv from updating the prompt. Set it to 12 if
+	# Disallow Python virtualenv from updating the prompt. Set it to 20 if
 	# untouched by the user to indicate that Pure modified it. Here we use
-	# the magic number 12, same as in `psvar`.
-	export VIRTUAL_ENV_DISABLE_PROMPT=${VIRTUAL_ENV_DISABLE_PROMPT:-12}
+	# the magic number 20, same as in `psvar`.
+	export VIRTUAL_ENV_DISABLE_PROMPT=${VIRTUAL_ENV_DISABLE_PROMPT:-20}
 }
 
 # Change the colors if their value are different from the current ones.
 prompt_pure_set_colors() {
 	local color_temp key value
 	for key value in ${(kv)prompt_pure_colors}; do
-		zstyle -t ":prompt:pure:$key" color "$value"
+		zstyle -t ":prompt:pure:$key" color "$value" && continue
 		case $? in
 			1) # The current style is different from the one from zstyle.
 				zstyle -s ":prompt:pure:$key" color color_temp
-				prompt_pure_colors[$key]=$color_temp ;;
+				prompt_pure_colors[${key}]=$color_temp ;;
 			2) # No style is defined.
-				prompt_pure_colors[$key]=$prompt_pure_colors_default[$key] ;;
+				prompt_pure_colors[${key}]=${prompt_pure_colors_default[${key}]} ;;
 		esac
 	done
+
+	prompt_pure_set_path_separator
+
+	return 0
+}
+
+prompt_pure_set_path_separator() {
+	typeset -g prompt_pure_path_segment="%F{${prompt_pure_colors[path]}}%~%f"
+
+	if zstyle -t ':prompt:pure:path:separator' dim; then
+		typeset -g prompt_pure_path_separator_dimmed=1
+	else
+		typeset -g prompt_pure_path_separator_dimmed=
+	fi
+}
+
+prompt_pure_render_dimmed_path() {
+	setopt localoptions noshwordsplit
+
+	# This runs from PROMPT_SUBST so directory changes followed by reset-prompt redraw correctly without precmd.
+	local current_path=${1:-${(%):-%~}}
+	current_path=${current_path//\%/%%}
+
+	local separator=$'%{\e[2m%}/%{\e[22m%}'
+	# Keep the leading / on absolute paths at full brightness.
+	local prefix=
+	if [[ $current_path == /* ]]; then
+		prefix=/
+		current_path=${current_path:1}
+	fi
+	print -n -r -- "%F{${prompt_pure_colors[path]}}${prefix}${current_path//\//$separator}%f"
 }
 
 prompt_pure_preprompt_render() {
@@ -141,79 +182,91 @@ prompt_pure_preprompt_render() {
 
 	unset prompt_pure_async_render_requested
 
-	# Set color for Git branch/dirty status and change color if dirty checking has been delayed.
-	local git_color=$prompt_pure_colors[git:branch]
-	local git_dirty_color=$prompt_pure_colors[git:dirty]
-	[[ -n ${prompt_pure_git_last_dirty_check_timestamp+x} ]] && git_color=$prompt_pure_colors[git:branch:cached]
+	# Update git branch color based on cache state.
+	typeset -g prompt_pure_git_branch_color=$prompt_pure_colors[git:branch]
+	[[ -n ${prompt_pure_git_last_dirty_check_timestamp+x} ]] && prompt_pure_git_branch_color=$prompt_pure_colors[git:branch:cached]
 
-	# Initialize the preprompt array.
-	local -a preprompt_parts
+	# Update psvar values. PROMPT uses %(NV.true.false) to conditionally
+	# render each part. See prompt_pure_setup for the PROMPT template.
+	#
+	# psvar[12]: Suspended jobs symbol.
+	psvar[12]=
+	((${(M)#jobstates:#suspended:*} != 0)) && psvar[12]=${PURE_SUSPENDED_JOBS_SYMBOL-}
 
-	# Suspended jobs in background.
-	if ((${(M)#jobstates:#suspended:*} != 0)); then
-		preprompt_parts+='%F{$prompt_pure_colors[suspended_jobs]}'
-		preprompt_parts+=$'\UF41C'
+	# psvar[13]: Username flag (set once in prompt_pure_state_setup).
+
+	# psvar[14]: Git branch name.
+	psvar[14]=${prompt_pure_vcs_info[branch]}
+
+	# psvar[15]: Git dirty marker.
+	psvar[15]=${prompt_pure_git_dirty}
+
+	# psvar[16]: Git action (rebase/merge).
+	psvar[16]=${prompt_pure_vcs_info[action]}
+
+	# psvar[17]: Git arrows (push/pull).
+	psvar[17]=${prompt_pure_git_arrows}
+
+	# psvar[18]: Git stash symbol.
+	psvar[18]=
+	[[ -n $prompt_pure_git_stash ]] && psvar[18]=${PURE_GIT_STASH_SYMBOL-≡}
+
+	# psvar[19]: Command execution time.
+	psvar[19]=${prompt_pure_cmd_exec_time}
+
+	# psvar[21]: Node.js version.
+	psvar[21]=
+	if [[ -n $prompt_pure_node_version ]]; then
+		local node_symbol
+		zstyle -s ":prompt:pure:environment:node_version" symbol node_symbol || node_symbol='⬢'
+		psvar[21]="${node_symbol}${prompt_pure_node_version}"
 	fi
 
-	# Username and machine, if applicable.
-	[[ -n $prompt_pure_state[username] ]] && preprompt_parts+=($prompt_pure_state[username])
+	# Fork-owned slots stay clear of upstream's 12-23 allocation. Update on
+	# every render so async redraws and removals cannot retain stale values.
+	psvar[90]=$(prompt_aws_vault_segment)
+	psvar[91]=$(prompt_zsh_autofn_segment)
 
-	# Set the path.
-	preprompt_parts+=('%F{${prompt_pure_colors[path]}}%~%f')
-
-	# Git branch and dirty status info.
-	typeset -gA prompt_pure_vcs_info
-	if [[ -n $prompt_pure_vcs_info[branch] ]]; then
-		preprompt_parts+=("%F{$git_color}"'${prompt_pure_vcs_info[branch]}'"%F{$git_dirty_color}"'${prompt_pure_git_dirty}%f')
-	fi
-	# Git action (for example, merge).
-	if [[ -n $prompt_pure_vcs_info[action] ]]; then
-		preprompt_parts+=("%F{$prompt_pure_colors[git:action]}"'$prompt_pure_vcs_info[action]%f')
-	fi
-	# Git pull/push arrows.
-	if [[ -n $prompt_pure_git_arrows ]]; then
-		preprompt_parts+=('%F{$prompt_pure_colors[git:arrow]}${prompt_pure_git_arrows}%f')
-	fi
-	# Git stash symbol (if opted in).
-	if [[ -n $prompt_pure_git_stash ]]; then
-		preprompt_parts+=('%F{$prompt_pure_colors[git:stash]}${PURE_GIT_STASH_SYMBOL:-≡}%f')
+	# psvar[22]: Custom prefix, psvar[23]: Custom suffix.
+	# Set by the user-defined prompt_pure_precustom function.
+	psvar[22]=
+	psvar[23]=
+	if (( $+functions[prompt_pure_precustom] )); then
+		prompt_pure_precustom
 	fi
 
-	# Execution time.
-	[[ -n $prompt_pure_cmd_exec_time ]] && preprompt_parts+=('%F{$prompt_pure_colors[execution_time]}${prompt_pure_cmd_exec_time}%f')
-
-	local cleaned_ps1=$PROMPT
-	local -H MATCH MBEGIN MEND
-	if [[ $PROMPT = *$prompt_newline* ]]; then
-		# Remove everything from the prompt until the newline. This
-		# removes the preprompt and only the original PROMPT remains.
-		cleaned_ps1=${PROMPT##*${prompt_newline}}
-	fi
-	unset MATCH MBEGIN MEND
-
-	# Construct the new prompt with a clean preprompt.
-	local -ah ps1
-	ps1=(
-		${(j. .)preprompt_parts}  # Join parts, space separated.
-		$prompt_newline           # Separate preprompt and prompt.
-		$cleaned_ps1
+	# Build a fingerprint from all dynamic prompt components to detect changes
+	# without expanding PROMPT (which forks a subshell when dimmed path is on).
+	local -a prompt_fingerprint_parts=(
+		"${psvar[12]}"
+		"${psvar[13]}"
+		"${psvar[14]}"
+		"${psvar[15]}"
+		"${psvar[16]}"
+		"${psvar[17]}"
+		"${psvar[18]}"
+		"${psvar[19]}"
+		"${psvar[20]}"
+		"${psvar[21]}"
+		"${psvar[22]}"
+		"${psvar[23]}"
+		"${psvar[90]}"
+		"${psvar[91]}"
+		"${prompt_pure_state[prompt]}"
+		"${prompt_pure_git_branch_color}"
+		"${PWD}"
 	)
-
-	PROMPT="${(j..)ps1}"
-
-	# Expand the prompt for future comparision.
-	local expanded_prompt
-	expanded_prompt="${(S%%)PROMPT}"
+	local prompt_fingerprint="${(pj:|:)${(@qqq)prompt_fingerprint_parts}}"
 
 	if [[ $1 == precmd ]]; then
 		# Initial newline, for spaciousness.
 		print
-	elif [[ $prompt_pure_last_prompt != $expanded_prompt ]]; then
+	elif [[ $prompt_pure_last_prompt != $prompt_fingerprint ]]; then
 		# Redraw the prompt.
 		prompt_pure_reset_prompt
 	fi
 
-	typeset -g prompt_pure_last_prompt=$expanded_prompt
+	typeset -g prompt_pure_last_prompt=$prompt_fingerprint
 }
 
 prompt_pure_precmd() {
@@ -232,18 +285,24 @@ prompt_pure_precmd() {
 	# Perform async Git dirty check and fetch.
 	prompt_pure_async_tasks
 
-	# Check if we should display the virtual env. We use a sufficiently high
-	# index of psvar (12) here to avoid collisions with user defined entries.
-	psvar[12]=
-	# Check if a Conda environment is active and display its name.
-	if [[ -n $CONDA_DEFAULT_ENV ]]; then
-		psvar[12]="${CONDA_DEFAULT_ENV//[$'\t\r\n']}"
-	fi
-	# When VIRTUAL_ENV_DISABLE_PROMPT is empty, it was unset by the user and
-	# Pure should take back control.
-	if [[ -n $VIRTUAL_ENV ]] && [[ -z $VIRTUAL_ENV_DISABLE_PROMPT || $VIRTUAL_ENV_DISABLE_PROMPT = 12 ]]; then
-		psvar[12]="${VIRTUAL_ENV:t}"
-		export VIRTUAL_ENV_DISABLE_PROMPT=12
+	# Check if we should display the virtual env (psvar[20]).
+	psvar[20]=
+	if zstyle -T ":prompt:pure:environment:virtualenv" show; then
+		# Check if a Conda environment is active and display its name.
+		# The 'base' environment is always active and not informative.
+		if [[ -n $CONDA_DEFAULT_ENV ]] && [[ ${CONDA_DEFAULT_ENV:t} != base ]]; then
+			psvar[20]="${${CONDA_DEFAULT_ENV:t}//[$'\t\r\n']}"
+		fi
+		# When VIRTUAL_ENV_DISABLE_PROMPT is empty, it was unset by the user and
+		# Pure should take back control.
+		if [[ -n $VIRTUAL_ENV ]] && [[ -z $VIRTUAL_ENV_DISABLE_PROMPT || $VIRTUAL_ENV_DISABLE_PROMPT = 20 ]]; then
+			if [[ -n $VIRTUAL_ENV_PROMPT ]]; then
+				psvar[20]="${VIRTUAL_ENV_PROMPT}"
+			else
+				psvar[20]="${VIRTUAL_ENV:t}"
+			fi
+			export VIRTUAL_ENV_DISABLE_PROMPT=20
+		fi
 	fi
 
 	# Nix package manager integration. If used from within 'nix shell' - shell name is shown like so:
@@ -251,21 +310,8 @@ prompt_pure_precmd() {
 	# flake-utils-plus ❯
 	if zstyle -T ":prompt:pure:environment:nix-shell" show; then
 		if [[ -n $IN_NIX_SHELL ]]; then
-			psvar[12]="${name:-nix-shell}"
+			psvar[20]="${name:-nix-shell}"
 		fi
-	fi
-
-	# Check for active AWS-VAULT profile and set psvar[13]
-	psvar[13]=
-	aws_vault_profile=$(prompt_aws_vault_segment)
-	if [[ -n $aws_vault_profile ]]; then
-		psvar[13]="${aws_vault_profile//[$'\t\r\n']}"
-	fi
-
-	psvar[14]=
-	zsh_autofn_profile=$(prompt_zsh_autofn_segment)
-	if [[ -n $zsh_autofn_profile ]]; then
-		psvar[14]="${zsh_autofn_profile//[$'\t\r\n']}"
 	fi
 
 	# Make sure VIM prompt is reset.
@@ -281,8 +327,15 @@ prompt_pure_precmd() {
 	fi
 }
 
+prompt_pure_async_print_generation() {
+	if [[ -n ${PROMPT_PURE_WORKER_GENERATION-} ]]; then
+		print -r -- "$PROMPT_PURE_WORKER_GENERATION"
+	fi
+}
+
 prompt_pure_async_git_aliases() {
 	setopt localoptions noshwordsplit
+	prompt_pure_async_print_generation
 	local -a gitalias pullalias
 
 	# List all aliases and split on newline.
@@ -303,6 +356,7 @@ prompt_pure_async_git_aliases() {
 
 prompt_pure_async_vcs_info() {
 	setopt localoptions noshwordsplit
+	prompt_pure_async_print_generation
 
 	# Configure `vcs_info` inside an async task. This frees up `vcs_info`
 	# to be used or configured as the user pleases.
@@ -326,9 +380,12 @@ prompt_pure_async_vcs_info() {
 }
 
 # Fastest possible way to check if a Git repo is dirty.
+# When detailed mode is enabled, outputs markers: * (unstaged), + (staged), ? (untracked).
 prompt_pure_async_git_dirty() {
 	setopt localoptions noshwordsplit
+	prompt_pure_async_print_generation
 	local untracked_dirty=$1
+	local detailed=${2:-0}
 	local untracked_git_mode=$(command git config --get status.showUntrackedFiles)
 	if [[ "$untracked_git_mode" != 'no' ]]; then
 		untracked_git_mode='normal'
@@ -337,17 +394,48 @@ prompt_pure_async_git_dirty() {
 	# Prevent e.g. `git status` from refreshing the index as a side effect.
 	export GIT_OPTIONAL_LOCKS=0
 
-	if [[ $untracked_dirty = 0 ]]; then
-		command git diff --no-ext-diff --quiet --exit-code
-	else
-		test -z "$(command git status --porcelain -u${untracked_git_mode})"
+	if (( ! detailed )); then
+		if [[ $untracked_dirty = 0 ]]; then
+			command git diff --no-ext-diff --quiet --exit-code || return $?
+			command git diff --no-ext-diff --cached --quiet --exit-code
+		else
+			test -z "$(command git status --porcelain -u${untracked_git_mode})"
+		fi
+
+		return
 	fi
 
-	return $?
+	local u_flag
+	if [[ $untracked_dirty = 0 ]]; then
+		u_flag='-uno'
+	else
+		u_flag="-u${untracked_git_mode}"
+	fi
+
+	local output
+	output=$(command git status --porcelain $u_flag)
+	[[ -z $output ]] && return 0
+
+	local has_unstaged=0 has_staged=0 has_untracked=0 line
+	for line in "${(f)output}"; do
+		(( ! has_unstaged )) && [[ ${line[2]} == [MTDUA] ]] && has_unstaged=1
+		(( ! has_staged )) && [[ ${line[1]} == [MTADRCU] ]] && has_staged=1
+		(( ! has_untracked )) && [[ $line == '??'* ]] && has_untracked=1
+		(( has_unstaged + has_staged + has_untracked == 3 )) && break
+	done
+
+	local markers=""
+	(( has_unstaged )) && markers+="*"
+	(( has_staged )) && markers+="+"
+	(( has_untracked )) && markers+="?"
+
+	print -r - "$markers"
+	return 1
 }
 
 prompt_pure_async_git_fetch() {
 	setopt localoptions noshwordsplit
+	prompt_pure_async_print_generation
 
 	local only_upstream=${1:-0}
 
@@ -401,7 +489,7 @@ prompt_pure_async_git_fetch() {
 
 	# Do git fetch and avoid fetching tags or
 	# submodules to speed up the process.
-	command git -c gc.auto=0 fetch \
+	command git -c gc.auto=0 -c fetch.prune=false fetch \
 		--quiet \
 		--no-tags \
 		--no-prune-tags \
@@ -412,16 +500,40 @@ prompt_pure_async_git_fetch() {
 	unsetopt monitor
 
 	# Check arrow status after a successful `git fetch`.
-	prompt_pure_async_git_arrows
+	# Pass 0 to skip generation printing (this function already printed it).
+	prompt_pure_async_git_arrows 0
 }
 
 prompt_pure_async_git_arrows() {
 	setopt localoptions noshwordsplit
+	if (( ${1:-1} )); then
+		prompt_pure_async_print_generation
+	fi
 	command git rev-list --left-right --count HEAD...@'{u}'
 }
 
 prompt_pure_async_git_stash() {
-	git rev-list --walk-reflogs --count refs/stash
+	prompt_pure_async_print_generation
+	command git rev-list --walk-reflogs --count refs/stash
+}
+
+prompt_pure_check_node_version() {
+	setopt localoptions noshwordsplit
+
+	# Walk up to find package.json (similar to how git detects repos).
+	local dir=$PWD
+	while [[ $dir != "/" ]]; do
+		[[ -f "$dir/package.json" ]] && break
+		dir=${dir:h}
+	done
+
+	local version=
+	if [[ -f "$dir/package.json" ]]; then
+		version=$(command node --version 2>/dev/null) || version=
+		version=${${${version#v}%%.*}//[$'\t\r\n']}
+	fi
+
+	print -r -- "$version"
 }
 
 # Try to lower the priority of the worker so that disk heavy operations
@@ -438,13 +550,27 @@ prompt_pure_async_renice() {
 	fi
 }
 
+prompt_pure_clear_git_state() {
+	unset prompt_pure_git_dirty prompt_pure_git_last_dirty_check_timestamp prompt_pure_git_arrows prompt_pure_git_stash prompt_pure_git_fetch_pattern
+	typeset -gA prompt_pure_worker_env=()
+	typeset -gA prompt_pure_vcs_info
+	prompt_pure_vcs_info[branch]=
+	prompt_pure_vcs_info[top]=
+	prompt_pure_vcs_info[action]=
+	prompt_pure_vcs_info[pwd]=
+}
+
 prompt_pure_async_init() {
 	typeset -g prompt_pure_async_inited
 	if ((${prompt_pure_async_inited:-0})); then
 		return
 	fi
+	if ! async_start_worker "prompt_pure" -u -n 2>/dev/null; then
+		# Worker failed to start (e.g. zpty permission denied).
+		# Degrade gracefully by skipping async git operations.
+		return 1
+	fi
 	prompt_pure_async_inited=1
-	async_start_worker "prompt_pure" -u -n
 	async_register_callback "prompt_pure" prompt_pure_async_callback
 	async_worker_eval "prompt_pure" prompt_pure_async_renice
 }
@@ -452,31 +578,109 @@ prompt_pure_async_init() {
 prompt_pure_async_tasks() {
 	setopt localoptions noshwordsplit
 
-	# Initialize the async worker.
-	prompt_pure_async_init
+	# Check if Node.js version display is enabled (independent of Git).
+	if zstyle -t ":prompt:pure:environment:node_version" show; then
+		# Cache key uses "|" separator so the value is never a valid directory
+		# path, preventing zsh from treating it as a named directory for %~.
+		local node_cache_key="$PWD|$PATH"
+		if [[ ${prompt_pure_node_cache_key-} != "$node_cache_key" ]]; then
+			typeset -g prompt_pure_node_version=$(prompt_pure_check_node_version)
+			typeset -g prompt_pure_node_cache_key=$node_cache_key
+		fi
+	else
+		unset prompt_pure_node_version
+		unset prompt_pure_node_cache_key
+	fi
 
-	# Update the current working directory of the async worker.
-	async_worker_eval "prompt_pure" builtin cd -q $PWD
+	# Check if git integration is enabled (default: yes).
+	if ! zstyle -T ":prompt:pure:git" show; then
+		# Flush any in-flight async git jobs.
+		if (( ${prompt_pure_async_inited:-0} )); then
+			async_flush_jobs "prompt_pure"
+		fi
+
+		prompt_pure_clear_git_state
+		return
+	fi
+
+	# Initialize the async worker. If it fails (e.g. zpty unavailable),
+	# skip all async tasks and show prompt without git info.
+	if ! prompt_pure_async_init; then
+		prompt_pure_clear_git_state
+		return
+	fi
+
+	# Sync working directory and git environment variables to the async worker.
+	# Skip if nothing changed since last sync (common case: running commands in same dir).
+	# Uses an associative array to avoid scalar globals triggering AUTO_NAME_DIRS.
+	# The evals are queued fire-and-forget, so the git jobs below run after them
+	# in worker FIFO order, keeping the git info a single async cycle behind a `cd`.
+	typeset -gA prompt_pure_worker_env
+	local cur_git_dir=${GIT_DIR-__unset__}
+	local cur_git_work_tree=${GIT_WORK_TREE-__unset__}
+	local working_directory_changed=0
+	if [[ $PWD != ${prompt_pure_worker_env[pwd]-} ]]; then
+		working_directory_changed=1
+	fi
+	local git_environment_changed=0
+	if [[ $cur_git_dir != ${prompt_pure_worker_env[git_dir]-} ||
+		$cur_git_work_tree != ${prompt_pure_worker_env[git_work_tree]-} ]]; then
+		git_environment_changed=1
+	fi
 
 	typeset -gA prompt_pure_vcs_info
 
-	local -H MATCH MBEGIN MEND
-	if [[ $PWD != ${prompt_pure_vcs_info[pwd]}* ]]; then
-		# Stop any running async jobs.
-		async_flush_jobs "prompt_pure"
+	local working_tree_changed=0
+	if [[ ${prompt_pure_vcs_info[pwd]} != / &&
+		$PWD != ${prompt_pure_vcs_info[pwd]} &&
+		$PWD != ${prompt_pure_vcs_info[pwd]}/* ]]; then
+		working_tree_changed=1
+	fi
 
-		# Reset Git preprompt variables, switching working tree.
-		unset prompt_pure_git_dirty
-		unset prompt_pure_git_last_dirty_check_timestamp
-		unset prompt_pure_git_arrows
-		unset prompt_pure_git_stash
-		unset prompt_pure_git_fetch_pattern
+	if [[ $git_environment_changed == 1 ||
+		$working_directory_changed == 1 ||
+		$working_tree_changed == 1 ]]; then
+		# Reset preprompt variables before syncing the new working tree.
+		unset prompt_pure_git_dirty prompt_pure_git_last_dirty_check_timestamp prompt_pure_git_arrows prompt_pure_git_stash prompt_pure_git_fetch_pattern
 		prompt_pure_vcs_info[branch]=
 		prompt_pure_vcs_info[top]=
+		prompt_pure_vcs_info[action]=
 	fi
-	unset MATCH MBEGIN MEND
 
-	async_job "prompt_pure" prompt_pure_async_vcs_info
+	if [[ $working_directory_changed == 1 ||
+		$git_environment_changed == 1 ]]; then
+		# Cancel any in-flight git jobs from the previous working tree.
+		async_flush_jobs "prompt_pure"
+		typeset -gi prompt_pure_worker_generation
+		(( prompt_pure_worker_generation++ ))
+		local sync_generation=$prompt_pure_worker_generation
+
+		prompt_pure_worker_env[pwd]=$PWD
+		prompt_pure_worker_env[git_dir]=$cur_git_dir
+		prompt_pure_worker_env[git_work_tree]=$cur_git_work_tree
+		prompt_pure_worker_env[generation]=$sync_generation
+		prompt_pure_worker_env[sync_pending]=$sync_generation
+
+		local git_dir_command='unset GIT_DIR'
+		if (( ${+GIT_DIR} )); then
+			git_dir_command="export GIT_DIR=${(q)GIT_DIR}"
+		fi
+
+		local git_work_tree_command='unset GIT_WORK_TREE'
+		if (( ${+GIT_WORK_TREE} )); then
+			git_work_tree_command="export GIT_WORK_TREE=${(q)GIT_WORK_TREE}"
+		fi
+
+		local sync_command="print -r -- ${(q)sync_generation}; builtin cd -q ${(q)PWD} && $git_dir_command && $git_work_tree_command && typeset -g PROMPT_PURE_WORKER_GENERATION=${(q)sync_generation}"
+		if ! async_worker_eval "prompt_pure" "$sync_command"; then
+			if [[ ${prompt_pure_worker_env[sync_pending]-} == $sync_generation ]]; then
+				typeset -gA prompt_pure_worker_env=()
+			fi
+			return
+		fi
+	fi
+
+	async_job "prompt_pure" prompt_pure_async_vcs_info || return
 
 	# Only perform tasks inside a Git working tree.
 	[[ -n $prompt_pure_vcs_info[top] ]] || return
@@ -491,16 +695,16 @@ prompt_pure_async_refresh() {
 		# We set the pattern here to avoid redoing the pattern check until the
 		# working tree has changed. Pull and fetch are always valid patterns.
 		typeset -g prompt_pure_git_fetch_pattern="pull|fetch"
-		async_job "prompt_pure" prompt_pure_async_git_aliases
+		async_job "prompt_pure" prompt_pure_async_git_aliases || return
 	fi
 
-	async_job "prompt_pure" prompt_pure_async_git_arrows
+	async_job "prompt_pure" prompt_pure_async_git_arrows || return
 
 	# Do not perform `git fetch` if it is disabled or in home folder.
 	if (( ${PURE_GIT_PULL:-1} )) && [[ $prompt_pure_vcs_info[top] != $HOME ]]; then
 		zstyle -t :prompt:pure:git:fetch only_upstream
 		local only_upstream=$((? == 0))
-		async_job "prompt_pure" prompt_pure_async_git_fetch $only_upstream
+		async_job "prompt_pure" prompt_pure_async_git_fetch $only_upstream || return
 	fi
 
 	# If dirty checking is sufficiently fast,
@@ -508,13 +712,15 @@ prompt_pure_async_refresh() {
 	integer time_since_last_dirty_check=$(( EPOCHSECONDS - ${prompt_pure_git_last_dirty_check_timestamp:-0} ))
 	if (( time_since_last_dirty_check > ${PURE_GIT_DELAY_DIRTY_CHECK:-1800} )); then
 		unset prompt_pure_git_last_dirty_check_timestamp
-		# Check check if there is anything to pull.
-		async_job "prompt_pure" prompt_pure_async_git_dirty ${PURE_GIT_UNTRACKED_DIRTY:-1}
+		# Check if the working tree is dirty.
+		zstyle -t ":prompt:pure:git:dirty" detailed
+		local detailed_dirty=$((? == 0))
+		async_job "prompt_pure" prompt_pure_async_git_dirty ${PURE_GIT_UNTRACKED_DIRTY:-1} $detailed_dirty || return
 	fi
 
 	# If stash is enabled, tell async worker to count stashes
 	if zstyle -t ":prompt:pure:git:stash" show; then
-		async_job "prompt_pure" prompt_pure_async_git_stash
+		async_job "prompt_pure" prompt_pure_async_git_stash || return
 	else
 		unset prompt_pure_git_stash
 	fi
@@ -536,8 +742,27 @@ prompt_pure_async_callback() {
 	local job=$1 code=$2 output=$3 exec_time=$4 next_pending=$6
 	local do_render=0
 
+	if [[ $job != '[async]' ]] &&
+		(( ! ${prompt_pure_async_inited:-0} )); then
+		return
+	fi
+
 	case $job in
-	\[async])
+		prompt_pure_async_vcs_info|prompt_pure_async_git_aliases|prompt_pure_async_git_dirty|prompt_pure_async_git_fetch|prompt_pure_async_git_arrows|prompt_pure_async_git_stash)
+			local result_generation=${output%%$'\n'*}
+			if [[ $output == *$'\n'* ]]; then
+				output=${output#*$'\n'}
+			else
+				output=
+			fi
+			[[ $result_generation == ${prompt_pure_worker_env[generation]-} ]] || return
+			[[ -z ${prompt_pure_worker_env[sync_pending]-} ]] || return
+			[[ ${prompt_pure_worker_env[pwd]-} == $PWD ]] || return
+			;;
+	esac
+
+	case $job in
+		\[async])
 			# Handle all the errors that could indicate a crashed
 			# async worker. See zsh-async documentation for the
 			# definition of the exit codes.
@@ -547,18 +772,29 @@ prompt_pure_async_callback() {
 				#                 and defer the restart?
 				typeset -g prompt_pure_async_inited=0
 				async_stop_worker prompt_pure
-				prompt_pure_async_init   # Reinit the worker.
-				prompt_pure_async_tasks  # Restart all tasks.
+				typeset -gA prompt_pure_worker_env=()
+				if prompt_pure_async_init; then
+					prompt_pure_async_tasks  # Restart all tasks.
+				else
+					prompt_pure_clear_git_state
+					do_render=1
+					next_pending=0
+				fi
 
 				# Reset render state due to restart.
 				unset prompt_pure_async_render_requested
 			fi
 			;;
 		\[async/eval])
-			if (( code )); then
-				# Looks like async_worker_eval failed,
-				# rerun async tasks just in case.
-				prompt_pure_async_tasks
+			local eval_generation=${output%%$'\n'*}
+			local pending_generation=${prompt_pure_worker_env[sync_pending]-}
+			if [[ -n $pending_generation ]]; then
+				if (( code )) &&
+					[[ -z $eval_generation || $eval_generation == $pending_generation ]]; then
+					typeset -gA prompt_pure_worker_env=()
+				elif [[ $eval_generation == $pending_generation ]]; then
+					unset "prompt_pure_worker_env[sync_pending]"
+				fi
 			fi
 			;;
 		prompt_pure_async_vcs_info)
@@ -607,7 +843,7 @@ prompt_pure_async_callback() {
 			if (( code == 0 )); then
 				unset prompt_pure_git_dirty
 			else
-				typeset -g prompt_pure_git_dirty="*"
+				typeset -g prompt_pure_git_dirty="${output:-*}"
 			fi
 
 			[[ $prev_dirty != $prompt_pure_git_dirty ]] && do_render=1
@@ -686,7 +922,7 @@ prompt_pure_reset_prompt_symbol() {
 
 prompt_pure_update_vim_prompt_widget() {
 	setopt localoptions noshwordsplit
-	prompt_pure_state[prompt]=${${KEYMAP/vicmd/${PURE_PROMPT_VICMD_SYMBOL:-❮}}/(main|viins)/${PURE_PROMPT_SYMBOL:-❯}}
+	prompt_pure_state[prompt]=${${${KEYMAP/vicmd/${PURE_PROMPT_VICMD_SYMBOL:-❮}}/visual/${PURE_PROMPT_VICMD_SYMBOL:-❮}}/(main|viins)/${PURE_PROMPT_SYMBOL:-❯}}
 
 	prompt_pure_reset_prompt
 }
@@ -737,33 +973,47 @@ prompt_pure_state_setup() {
 		unset MATCH MBEGIN MEND
 	fi
 
-	hostname='%F{$prompt_pure_colors[host]}@%m%f'
+	local user_color
 	# Show `username@host` if logged in through SSH.
-	[[ -n $ssh_connection ]] && username='%F{$prompt_pure_colors[user]}%n%f'"$hostname"
+	[[ -n $ssh_connection ]] && user_color=user
 
 	# Show `username@host` if inside a container and not in GitHub Codespaces.
-	[[ -z "${CODESPACES}" ]] && prompt_pure_is_inside_container && username='%F{$prompt_pure_colors[user]}%n%f'"$hostname"
+	[[ -z "${CODESPACES}" ]] && prompt_pure_is_inside_container && user_color=user
 
 	# Show `username@host` if root, with username in default color.
-	[[ $UID -eq 0 ]] && username='%F{$prompt_pure_colors[user:root]}%n%f'"$hostname"
+	[[ $UID -eq 0 ]] && user_color=user:root
+
+	# Set psvar[13] flag for username display in PROMPT.
+	[[ -n $user_color ]] && psvar[13]=1
+
+	# Check if hostname display is enabled (default: yes).
+	local show_host=1
+	zstyle -T ":prompt:pure:host" show || show_host=0
 
 	typeset -gA prompt_pure_state
-	prompt_pure_state[version]="1.23.0"
+	prompt_pure_state[version]="1.28.3"
 	prompt_pure_state+=(
-		username "$username"
-		prompt	 "${PURE_PROMPT_SYMBOL:-❯}"
+		user_color "$user_color"
+		show_host  "$show_host"
+		prompt	   "${PURE_PROMPT_SYMBOL:-❯}"
 	)
 }
 
 # Return true if executing inside a Docker, OCI, LXC, or systemd-nspawn container.
 prompt_pure_is_inside_container() {
-	local -r cgroup_file='/proc/1/cgroup'
 	local -r nspawn_file='/run/host/container-manager'
-	[[ -r "$cgroup_file" && "$(< $cgroup_file)" = *(lxc|docker)* ]] \
-		|| [[ "$container" == "lxc" ]] \
+	local -r podman_crio_file='/run/.containerenv'
+	local -r docker_file='/.dockerenv'
+	local -r k8s_token_file='/var/run/secrets/kubernetes.io/serviceaccount/token'
+	local -r cgroup_file='/proc/1/cgroup'
+	[[ "$container" == "lxc" ]] \
 		|| [[ "$container" == "oci" ]] \
 		|| [[ "$container" == "podman" ]] \
-		|| [[ -r "$nspawn_file" ]]
+		|| [[ -r "$nspawn_file" ]] \
+		|| [[ -r "$podman_crio_file" ]] \
+		|| [[ -r "$docker_file" ]] \
+		|| [[ -r "$k8s_token_file" ]] \
+		|| [[ -r "$cgroup_file" && "$(< $cgroup_file)" = *(lxc|docker|containerd)* ]]
 }
 
 prompt_pure_system_report() {
@@ -820,6 +1070,38 @@ prompt_pure_system_report() {
 	fi
 }
 
+prompt_pure_preview() {
+	setopt localoptions noshwordsplit
+
+	prompt_pure_set_colors
+
+	local -A c=("${(@kv)prompt_pure_colors}")
+	local node_symbol
+	zstyle -s ":prompt:pure:environment:node_version" symbol node_symbol || node_symbol='⬢'
+
+	local path_sample="%F{$c[path]}~/dev/pure%f"
+	if zstyle -t ':prompt:pure:path:separator' dim; then
+		path_sample=$(prompt_pure_render_dimmed_path '~/dev/pure')
+	fi
+
+	local host_sample=''
+	if zstyle -T ":prompt:pure:host" show; then
+		host_sample="%F{$c[host]}@heartofgold%f"
+	fi
+
+	# Sample preprompt with all components visible.
+	print -P "%F{$c[custom:prefix]}prefix%f %F{$c[suspended_jobs]}${PURE_SUSPENDED_JOBS_SYMBOL-}%f %F{$c[user]}zaphod%f${host_sample} ${path_sample} %F{$c[git:branch]}main%f%F{$c[git:dirty]}*%f %F{$c[git:action]}rebase-i%f %F{$c[git:arrow]}${PURE_GIT_DOWN_ARROW:-⇣}${PURE_GIT_UP_ARROW:-⇡}%f %F{$c[git:stash]}${PURE_GIT_STASH_SYMBOL-≡}%f %F{$c[node_version]}${node_symbol}22%f %F{$c[execution_time]}42s%f %F{$c[custom:suffix]}suffix%f"
+	print -P "%F{$c[virtualenv]}venv%f %F{$c[prompt:success]}${PURE_PROMPT_SYMBOL:-❯}%f"
+	print
+	print -P "%F{$c[prompt:error]}${PURE_PROMPT_SYMBOL:-❯}%f  prompt after error"
+	print; print
+	print -P "%F{$c[git:branch:cached]}main%f  branch color when data is cached"
+	print; print
+	print -P "%F{$c[user:root]}root%f${host_sample}  root user"
+	print; print
+	print -P "%F{$c[prompt:continuation]}… if%f %F{$c[prompt:success]}${PURE_PROMPT_SYMBOL:-❯}%f  continuation prompt"
+}
+
 prompt_pure_setup() {
 	# Prevent percentage showing up if output doesn't end with a newline.
 	export PROMPT_EOL_MARK=''
@@ -846,12 +1128,13 @@ prompt_pure_setup() {
 
 	# The `add-zle-hook-widget` function is not guaranteed to be available.
 	# It was added in Zsh 5.3.
-	autoload -Uz +X add-zle-hook-widget 2>/dev/null
+	autoload -Uz +X add-zle-hook-widget 2>/dev/null || unfunction add-zle-hook-widget 2>/dev/null || true
 
 	# Set the colors.
-	# https://www.ditig.com/publications/256-colors-cheat-sheet
 	typeset -gA prompt_pure_colors_default prompt_pure_colors
 	prompt_pure_colors_default=(
+		custom:prefix        242
+		custom:suffix        242
 		execution_time       yellow
 		git:arrow            cyan
 		git:stash            cyan
@@ -860,6 +1143,7 @@ prompt_pure_setup() {
 		git:action           yellow
 		git:dirty            218
 		host                 242
+		node_version         green
 		path                 blue
 		prompt:error         red
 		prompt:success       magenta
@@ -869,7 +1153,7 @@ prompt_pure_setup() {
 		user:root            default
 		virtualenv           242
 		aws_vault            208
-		zsh_autofn 	         39
+		zsh_autofn           39
 	)
 	prompt_pure_colors=("${(@kv)prompt_pure_colors_default}")
 
@@ -886,12 +1170,62 @@ prompt_pure_setup() {
 		add-zle-hook-widget zle-keymap-select prompt_pure_update_vim_prompt_widget
 	fi
 
-	# If a virtualenv is activated, display it in grey.
-	PROMPT='%(12V.%F{$prompt_pure_colors[virtualenv]}%12v%f .)'
-	PROMPT+='%(13V.%F{$prompt_pure_colors[aws_vault]}%13v%f .)'
-	PROMPT+='%(14V.%F{$prompt_pure_colors[zsh_autofn]}%14v%f .)'
+	# Initialize git globals referenced by PROMPT via prompt subst.
+	typeset -gA prompt_pure_vcs_info
+	typeset -g prompt_pure_git_branch_color=$prompt_pure_colors[git:branch]
 
-	# Prompt turns red if the previous command didn't exit with 0.
+	# Construct PROMPT once, both preprompt and prompt line. Kept
+	# dynamic via variables and psvar[12-21], updated each render
+	# in prompt_pure_preprompt_render. Numbering starts at 12 for
+	# legacy reasons (Pure originally used psvar[12] for virtualenv)
+	# and to avoid collisions with low psvar indices which users
+	# may rely on (e.g. %v expands psvar[1]).
+	#
+	#   psvar[12] = suspended jobs symbol (e.g. ✦)
+	#   psvar[13] = username flag, renders user/host (e.g. user@host)
+	#   psvar[14] = git branch
+	#   psvar[15] = git dirty marker, nested inside [14] conditional
+	#   psvar[16] = git action (e.g. rebase, merge)
+	#   psvar[17] = git arrows (e.g. ⇣⇡)
+	#   psvar[18] = git stash symbol (e.g. ≡)
+	#   psvar[19] = exec time (e.g. 1d 3h 2m 5s)
+	#   psvar[20] = virtualenv/conda/nix-shell name
+	#   psvar[21] = Node.js version (e.g. ⬢22)
+	#   psvar[22] = custom prefix (set by prompt_pure_precustom)
+	#   psvar[23] = custom suffix (set by prompt_pure_precustom)
+	#   psvar[90] = AWS Vault profile (fork)
+	#   psvar[91] = zsh-autofn parent directory (fork)
+	#
+	# Example output:
+	#   prefix ✦ user@host ~/Code/pure main* rebase ⇣⇡ ≡ ⬢22 3s suffix
+	#   myenv ❯
+	#
+	# Preprompt line: each %(NV..) section only renders when its psvar is non-empty.
+	PROMPT='%(22V.%F{$prompt_pure_colors[custom:prefix]}%22v%f .)'
+	PROMPT+='%(12V.%F{$prompt_pure_colors[suspended_jobs]}%12v%f .)'
+	local hostname_part=''
+	if (( prompt_pure_state[show_host] )); then
+		hostname_part='%F{$prompt_pure_colors[host]}@%m%f'
+	fi
+	PROMPT+='%(13V.%F{$prompt_pure_colors['"${prompt_pure_state[user_color]:-user}"']}%n%f'"${hostname_part}"' .)'
+	prompt_pure_set_path_separator
+	PROMPT+='${${prompt_pure_path_separator_dimmed:+$(prompt_pure_render_dimmed_path)}:-${prompt_pure_path_segment}}'
+	PROMPT+='%(14V. %F{${prompt_pure_git_branch_color}}%14v%(15V.%F{$prompt_pure_colors[git:dirty]}%15v.)%f.)'
+	PROMPT+='%(16V. %F{$prompt_pure_colors[git:action]}%16v%f.)'
+	PROMPT+='%(17V. %F{$prompt_pure_colors[git:arrow]}%17v%f.)'
+	PROMPT+='%(18V. %F{$prompt_pure_colors[git:stash]}%18v%f.)'
+	PROMPT+='%(21V. %F{$prompt_pure_colors[node_version]}%21v%f.)'
+	PROMPT+='%(19V. %F{$prompt_pure_colors[execution_time]}%19v%f.)'
+	PROMPT+='%(23V. %F{$prompt_pure_colors[custom:suffix]}%23v%f.)'
+
+	# Newline separating preprompt from prompt.
+	PROMPT+='${prompt_newline}'
+
+	# Prompt line: virtualenv and prompt symbol.
+	PROMPT+='%(20V.%F{$prompt_pure_colors[virtualenv]}%20v%f .)'
+	PROMPT+='%(90V.%F{$prompt_pure_colors[aws_vault]}%90v%f .)'
+	PROMPT+='%(91V.%F{$prompt_pure_colors[zsh_autofn]}%91v%f .)'
+	# Prompt symbol: turns red if the previous command didn't exit with 0.
 	local prompt_indicator='%(?.%F{$prompt_pure_colors[prompt:success]}.%F{$prompt_pure_colors[prompt:error]})${prompt_pure_state[prompt]}%f '
 	PROMPT+=$prompt_indicator
 
@@ -916,7 +1250,7 @@ prompt_pure_setup() {
 		prompt 	  '%F{242}>%f '
 	)
 	# Combine the parts with conditional logic. First the `:+` operator is
-	# used to replace `compare` either with `main` or an ampty string. Then
+	# used to replace `compare` either with `main` or an empty string. Then
 	# the `:-` operator is used so that if `compare` becomes an empty
 	# string, it is replaced with `secondary`.
 	local ps4_symbols='${${'${ps4_parts[compare]}':+"'${ps4_parts[main]}'"}:-"'${ps4_parts[secondary]}'"}'
@@ -925,12 +1259,20 @@ prompt_pure_setup() {
 	# add colors to highlight essential parts like file and function name.
 	PROMPT4="${ps4_parts[depth]} ${ps4_symbols}${ps4_parts[prompt]}"
 
+	# Pure does not use a right-side prompt. Clear RPROMPT to prevent
+	# frameworks (e.g. Prezto) from leaking a previous theme's RPROMPT.
+	RPROMPT=
+
 	# Guard against Oh My Zsh themes overriding Pure.
 	unset ZSH_THEME
 
 	# Guard against (ana)conda changing the PS1 prompt
 	# (we manually insert the env when it's available).
 	export CONDA_CHANGEPS1=no
+
+	# Guard against pyenv-virtualenv changing the PS1 prompt
+	# (we manually insert the env when it's available).
+	export PYENV_VIRTUALENV_DISABLE_PROMPT=1
 }
 
 prompt_pure_setup "$@"
