@@ -39,4 +39,4 @@ npm run package:pack -- --pack-destination /absolute/output/directory
 
 Packaging copies release files and regular autoload aliases into a temporary directory and packs there. Checkout symlinks, source files, and Git state are preserved, including on failure. Direct `npm pack`/directory publishing is blocked with guidance to use this staging entrypoint. A generated archive can be reviewed and explicitly published separately. Tests inspect archive aliases and load the prompt from the extracted archive; they do not run installation hooks, publish, or alter system autoload directories.
 
-The existing Homebrew release workflow remains unchanged. Source checks, remote CI, release tag/tarball, tap updates, installation, and runtime consumer verification remain distinct gates.
+Homebrew publication follows a validated sync through an immutable timestamped release and a verified tap PR. The integration agent cannot edit this release machinery. Source checks, remote CI, release tag/tarball, tap updates, installation, and runtime consumer verification remain distinct gates.
