@@ -51,8 +51,8 @@ version="$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1]))
 installed="$(brew list --versions pure-release/verification/pure)"
 [[ "$installed" == "pure $version" ]]
 # Exercise Homebrew's own ordering implementation, not semver assumptions.
-export PURE_RELEASE_VERSION="$version"
-brew ruby -e 'require "version"; current = ENV.fetch("PURE_RELEASE_VERSION"); base, stamp = current.split("+"); a = Version.new(base + "+20000101000000"); b = Version.new(base + "+20000101000001"); next_base = base.split(".").map(&:to_i); next_base[2] += 1; abort "Homebrew version ordering failed" unless a < b && b < Version.new(next_base.join(".")) && Version.new(current).to_s == current'
+# Homebrew sanitizes the environment before Ruby; pass the version as an argument.
+brew ruby -e 'require "version"; current = ARGV.fetch(0); base, stamp = current.split("+"); a = Version.new(base + "+20000101000000"); b = Version.new(base + "+20000101000001"); next_base = base.split(".").map(&:to_i); next_base[2] += 1; abort "Homebrew version ordering failed" unless a < b && b < Version.new(next_base.join(".")) && Version.new(current).to_s == current' -- "$version"
 # Runtime uses only the installed formula and an isolated startup configuration.
 prefix="$(brew --prefix pure-release/verification/pure)"
 async_prefix="$(brew --prefix zsh-async)"
