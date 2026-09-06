@@ -1,4 +1,47 @@
-# Manual releases
+# Releases
+
+## Automatic fork releases and Homebrew publication
+
+The private upstream maintainer publishes an immutable `vX.Y.Z+yyyyMMddHHmmss`
+GitHub release after a validated upstream sync. The base comes from the latest
+upstream release, and the timestamp uses Europe/Malta. Package and prompt runtime
+versions remain coherent and may be ahead of that latest release when upstream
+main has advanced. An App installation token creates the release so GitHub
+delivers its `release: published` event.
+
+`release.yml` binds to that exact published tag and its commit, checks that the
+commit remains an ancestor of source main, downloads its archive, and generates a
+formula with the complete explicit version and archive SHA-256. It never resolves
+the latest release. A separate hosted macOS job verifies the archive and source
+versions, installs the formula in a temporary verification tap with isolated shell
+configuration and caches, runs `brew test`, checks the installed version and prompt runtime,
+and exercises Homebrew's own version ordering across builds and the next base.
+The formula retains its existing external `zsh-async` dependency.
+
+Only the final Ubuntu publisher receives `PERSONAL_ACCESS_TOKEN`. It regenerates
+the formula and checks every artifact byte, then rechecks the release/tag/commit
+and public archive. It creates an immutable tag-keyed branch and a PR changing
+only `Formula/pure.rb` in `SijanC147/homebrew-formulas`. Normal GitHub PR merge
+enforces repository protections; no direct main push or bypass is used. The
+publisher checks the PR head, base, current tap main, checks and merged formula.
+A changed base, conflicting branch, same-version content mismatch, or downgrade
+stops it. Matching completed publication is idempotent. All workflow runs serialize.
+Pending or failed tap checks stop publication; retry after they pass. Zero checks
+are accepted only when the tap has no active Actions workflows, as in the current
+tap. Repository-required checks remain enforced by GitHub's normal merge endpoint.
+
+If a published release needs a retry, dispatch the workflow on that exact tag:
+
+```sh
+gh workflow run release.yml --repo SijanC147/pure \
+  --ref v1.28.3+20260906070809 -f tag=v1.28.3+20260906070809
+```
+
+Use the actual existing tag. Dispatching on the tag keeps the workflow run's SHA
+bound to the source release, including when main has advanced. Inspect a conflicting
+partial tap PR before retrying; the workflow never force-pushes or deletes it.
+
+## Manual base-version preparation
 
 Release preparation and publication are separate actions. `make patch`, `make minor`,
 `make major`, and the legacy `make release TYPE=patch` prepare a pull request. They
@@ -41,10 +84,11 @@ tag creation also fails; no tag is replaced. A failure to inspect CI or tags pre
 release. If tag creation succeeds but publication fails, the tag remains for
 inspection and manual recovery. Do not delete or overwrite it to rerun the helper.
 
-Publication triggers the existing Homebrew release workflow. This helper's checks do
-not establish Homebrew tap, installation, runtime, or downstream consumer success;
-verify those separately after publication. The helper does not edit the tap or the
-Homebrew workflow.
+The legacy manual publisher creates plain base-version tags, which the Homebrew
+workflow also accepts when the tag matches the coherent package/runtime version.
+The maintainer always creates timestamped fork tags. This helper's
+checks do not establish Homebrew tap, installation, runtime, or downstream consumer
+success; verify those separately after publication.
 
 Run `make test-release-safety` to test these safeguards with isolated local fixtures
 and mocked network commands. Tests never push to GitHub or publish a release.
