@@ -110,15 +110,22 @@ export async function requireTapChecks(head: string, request: Api): Promise<void
   if (checks.check_runs.some(check => check.status !== 'completed' || check.conclusion !== 'success') || statuses.statuses.some(status => status.state !== 'success')) throw new Error('Tap checks are pending or failed; retry after they pass');
   if (checks.check_runs.length + statuses.statuses.length === 0 && workflows.workflows.some(workflow => workflow.state === 'active')) throw new Error('Active tap workflows have not reported checks yet');
 }
-/** Require Actions to execute the same immutable source commit being published. */
-export function requireWorkflowBinding(tag: string, commit: string, env: NodeJS.ProcessEnv): void {
+/** Use tagged code normally; explicit repair retries may use only current source main. */
+export async function requireWorkflowBinding(tag: string, commit: string, env: NodeJS.ProcessEnv, request: Api = api): Promise<void> {
   if (env.GITHUB_ACTIONS !== 'true') return;
-  if (env.GITHUB_REPOSITORY !== SOURCE || !['release', 'workflow_dispatch'].includes(env.GITHUB_EVENT_NAME ?? '') || env.GITHUB_SHA !== commit || env.GITHUB_REF !== `refs/tags/${tag}`) throw new Error('Workflow must run on the exact published source tag and commit');
+  if (env.GITHUB_REPOSITORY !== SOURCE || !['release', 'workflow_dispatch'].includes(env.GITHUB_EVENT_NAME ?? '')) throw new Error('Workflow repository or event is not authorized');
+  if (env.GITHUB_REF === `refs/tags/${tag}` && env.GITHUB_SHA === commit) return;
+  if (env.GITHUB_EVENT_NAME === 'workflow_dispatch' && env.GITHUB_REF === 'refs/heads/main') {
+    const currentMain = requireSha((await request<Ref>(`repos/${SOURCE}/git/ref/heads/main`)).object.sha);
+    if (env.GITHUB_SHA === currentMain) return;
+    throw new Error('Repair workflow commit is no longer current source main');
+  }
+  throw new Error('Workflow must run on the exact published tag or be explicitly dispatched on current main');
 }
 /** Prepare deterministic artifacts without publication credentials. */
 export async function prepare(tag: string, directory: string): Promise<void> {
   const binding = await releaseBinding(tag);
-  requireWorkflowBinding(tag, binding.commit, process.env);
+  await requireWorkflowBinding(tag, binding.commit, process.env);
   if (process.env.GITHUB_EVENT_NAME === 'release') {
     const event = JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH!, 'utf8')) as {release: Release};
     if (event.release.tag_name !== tag || event.release.id !== binding.releaseId) throw new Error('Release event binding mismatch');
@@ -139,7 +146,7 @@ export async function publish(directory: string, request: Api = api, download = 
   const formula = await readFile(resolve(directory, 'pure.rb'), 'utf8');
   const archive = await readFile(resolve(directory, 'archive.tar.gz'));
   validateProof(proof, archive, formula);
-  requireWorkflowBinding(proof.tag, proof.commit, environment);
+  await requireWorkflowBinding(proof.tag, proof.commit, environment, request);
   const binding = await releaseBinding(proof.tag, request);
   if (binding.commit !== proof.commit || binding.releaseId !== proof.releaseId || binding.sourceVersion !== proof.sourceVersion) throw new Error('Release changed after verification');
   if (digest(await download(proof.tag)) !== proof.archiveSha256) throw new Error('Published archive changed after verification');

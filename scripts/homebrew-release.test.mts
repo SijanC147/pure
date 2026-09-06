@@ -64,11 +64,21 @@ test('timestamp releases permit coherent source versions newer than the tag base
   });
   assert.equal((await releaseBinding(tag, next)).sourceVersion, '1.28.4');
 });
-test('workflow retry must execute the exact published tag and repository', () => {
+test('normal release and tag retry execute the exact published tag and repository', async () => {
   const env = {GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REPOSITORY: 'SijanC147/pure', GITHUB_SHA: proof.commit, GITHUB_REF: `refs/tags/${tag}`};
-  requireWorkflowBinding(tag, proof.commit, env);
-  requireWorkflowBinding(tag, proof.commit, {...env, GITHUB_EVENT_NAME: 'release'});
-  for (const change of [{GITHUB_REF: 'refs/heads/main'}, {GITHUB_SHA: 'd'.repeat(40)}, {GITHUB_REPOSITORY: 'other/pure'}, {GITHUB_EVENT_NAME: 'pull_request'}]) assert.throws(() => requireWorkflowBinding(tag, proof.commit, {...env, ...change}));
+  await requireWorkflowBinding(tag, proof.commit, env, fixture());
+  await requireWorkflowBinding(tag, proof.commit, {...env, GITHUB_EVENT_NAME: 'release'}, fixture());
+  for (const change of [{GITHUB_REF: 'refs/heads/unreviewed'}, {GITHUB_SHA: 'd'.repeat(40)}, {GITHUB_REPOSITORY: 'other/pure'}, {GITHUB_EVENT_NAME: 'pull_request'}]) await assert.rejects(requireWorkflowBinding(tag, proof.commit, {...env, ...change}, fixture()));
+});
+test('manual repair retries use live current main while preserving the original release commit', async () => {
+  const env = {GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'workflow_dispatch', GITHUB_REPOSITORY: 'SijanC147/pure', GITHUB_SHA: 'c'.repeat(40), GITHUB_REF: 'refs/heads/main'};
+  await requireWorkflowBinding(tag, proof.commit, env, fixture());
+  await assert.rejects(requireWorkflowBinding(tag, proof.commit, {...env, GITHUB_SHA: proof.commit}, fixture()), /no longer current/);
+  await assert.rejects(requireWorkflowBinding(tag, proof.commit, {...env, GITHUB_REF: 'refs/heads/fix'}, fixture()), /exact published tag/);
+  await assert.rejects(requireWorkflowBinding(tag, proof.commit, {...env, GITHUB_EVENT_NAME: 'release'}, fixture()), /exact published tag/);
+  await assert.rejects(requireWorkflowBinding(tag, proof.commit, {...env, GITHUB_REPOSITORY: 'other/pure'}, fixture()), /not authorized/);
+  const changedMain = fixture({'repos/SijanC147/pure/git/ref/heads/main': {object: {sha: 'd'.repeat(40)}}});
+  await assert.rejects(requireWorkflowBinding(tag, proof.commit, env, changedMain), /no longer current/);
 });
 async function artifact(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), 'pure-publication-test-'));

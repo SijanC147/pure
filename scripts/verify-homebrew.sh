@@ -45,7 +45,7 @@ brew tap-new pure-release/verification
 formula_dir="$(brew --repository pure-release/verification)/Formula"
 mkdir -p "$formula_dir"
 cp "$artifact/pure.rb" "$formula_dir/pure.rb"
-brew install --build-from-source pure-release/verification/pure
+brew install --build-from-source --include-test pure-release/verification/pure
 brew test pure-release/verification/pure
 version="$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1])).version' "$artifact/release.json")"
 installed="$(brew list --versions pure-release/verification/pure)"

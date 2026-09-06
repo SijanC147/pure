@@ -14,7 +14,8 @@ commit remains an ancestor of source main, downloads its archive, and generates 
 formula with the complete explicit version and archive SHA-256. It never resolves
 the latest release. A separate hosted macOS job verifies the archive and source
 versions, installs the formula in a temporary verification tap with isolated shell
-configuration and caches, runs `brew test`, checks the installed version and prompt runtime,
+configuration and caches, installs test dependencies with `--include-test`, runs
+`brew test`, checks the installed version and prompt runtime,
 and exercises Homebrew's own version ordering across builds and the next base.
 The formula retains its existing external `zsh-async` dependency.
 
@@ -40,6 +41,21 @@ gh workflow run release.yml --repo SijanC147/pure \
 Use the actual existing tag. Dispatching on the tag keeps the workflow run's SHA
 bound to the source release, including when main has advanced. Inspect a conflicting
 partial tap PR before retrying; the workflow never force-pushes or deletes it.
+
+If the workflow itself needs a repair, merge and validate the repair on source
+main, then explicitly dispatch from current main while retaining the existing tag:
+
+```sh
+gh workflow run release.yml --repo SijanC147/pure \
+  --ref main -f tag=v1.28.3+20260906071326
+```
+
+This manual repair path checks the executing workflow SHA against live source
+main in both preparation and publication. A stale main run, any other branch,
+or a release event on main is rejected. The release tag, original source commit,
+archive checksum and verification artifacts remain bound to the original release;
+no release or tag is recreated. The workflow run SHA identifies the reviewed
+repair commit, so inspect its release proof to confirm the original source SHA.
 
 ## Manual base-version preparation
 
