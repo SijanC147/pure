@@ -1,0 +1,129 @@
+version: 1
+$schema: https://raw.githubusercontent.com/SijanC147/pure-upstream-maintainer/main/schema/upstream-maintainer.schema.json
+
+identity:
+  name: Pure Upstream Maintainer
+  email: pure-upstream-maintainer@users.noreply.github.com
+
+concurrency:
+  max_open_prs: 1
+
+defaults:
+  target_branch: main
+  schedule:
+    cron: "17 4 * * *"
+    timezone: Europe/Malta
+  policy:
+    protected_paths:
+      - ".github/**"
+      - ".gitmodules"
+      - ".npmrc"
+      - "Makefile"
+      - "bump.sh"
+      - "publish.sh"
+      - "scripts/**"
+      - "tests/fork-*"
+      - "tests/release-*"
+      - "tests/test.zsh"
+      - "tests/test-helper.zsh"
+      - "docs/fork-contract.md"
+      - "docs/releasing.md"
+    on_upstream_protected_change: halt
+    manifests:
+      - file: package.json
+        frozen_keys: [dependencies, optionalDependencies, peerDependencies, bundledDependencies, bundleDependencies, scripts]
+    preserve_upstream_paths:
+      - glob: "tests/**"
+        except: ["tests/test.zsh", "tests/test-helper.zsh"]
+    forbidden_patterns:
+      - paths: ["pure.zsh"]
+        regex: 'psvar\s*\[\s*(?:90|91)\s*\]|%(?:90|91)[vV]'
+        message: Upstream uses fork reserved prompt slots 90/91; adaptation required
+  agent:
+    model: auto
+    prompt: |
+      Preserve every behavior in context/docs__fork-contract.md. Upstream owns psvar slots 12-23;
+      the fork owns psvar[90] (AWS Vault) and psvar[91] (autofn).
+    context_files:
+      - docs/fork-contract.md
+    max_repair_rounds: 2
+    timeouts:
+      resolve_minutes: 8
+      repair_minutes: 8
+      review_minutes: 6
+  validation:
+    environment:
+      image: node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e
+      packages: [zsh, python3, git, jq, make]
+      env:
+        LC_ALL: C.UTF-8
+        TERM: xterm-256color
+        PURE_ROOT: /workspace/target
+        ZSH_BIN: zsh
+        npm_config_cache: /tmp/npm-cache
+        npm_config_update_notifier: "false"
+        npm_config_audit: "false"
+      resources: {memory: 2g, cpus: 2, pids: 512}
+      writable_paths: [".ai-temporary"]
+    gates:
+      - name: fork-acceptance
+        source: base
+        run: export FPATH="$PURE_ROOT:$(env -u FPATH zsh -dfc 'print -r -- $FPATH')" ZDOTDIR=/tmp; zsh -df tests/fork-customizations.zsh
+        timeout_minutes: 10
+      - name: fork-pty
+        source: base
+        run: export ZSH_BIN="$(command -v zsh)" FPATH="$PURE_ROOT:$(env -u FPATH zsh -dfc 'print -r -- $FPATH')" ZDOTDIR=/tmp; python3 tests/fork-pty.py
+        timeout_minutes: 10
+      - name: fork-package
+        source: base
+        run: ZSH_BIN="$(command -v zsh)" python3 tests/fork-package.py
+        timeout_minutes: 10
+      - name: upstream-suite
+        source: candidate
+        run: |
+          export FPATH="$PURE_ROOT:$(env -u FPATH zsh -dfc 'print -r -- $FPATH')" ZDOTDIR=/tmp
+          count=0
+          for test_file in tests/*.zsh; do
+            case "${test_file##*/}" in test.zsh|test-helper.zsh|benchmark.zsh|fork-*) continue ;; esac
+            printf 'Upstream test: %s\n' "${test_file##*/}"; zsh -df "$test_file"; count=$((count + 1))
+          done
+          test "$count" -ge 11 || { echo 'Incoming upstream test inventory unexpectedly shrank.' >&2; exit 1; }
+        timeout_minutes: 10
+      - name: release-safety
+        source: candidate
+        run: bash tests/release-safety.sh
+        timeout_minutes: 5
+    required_checks:
+      - Pure validation (ubuntu-latest)
+      - Pure validation (macos-latest)
+      - Pure validation (zsh 5.2)
+  pull_request:
+    branch_template: "upstream-sync/{{base.sha12}}-{{upstream.sha12}}"
+    title_template: "chore: integrate Pure upstream {{upstream.sha12}}"
+    body_template: |
+      Integrates upstream `{{upstream.sha}}` into `{{target.branch}}` at `{{base.sha}}` through a real merge.
+
+      {{gates.markdown}}
+
+      {{isolation.markdown}}
+    labels: []
+    status_context: upstream/verified
+    commit_message_template: "chore: integrate upstream {{upstream.sha12}}"
+  merge:
+    mode: auto
+    method: merge
+    require_branch_protection: true
+  release:
+    enabled: true
+    timestamp: {format: yyyyMMddHHmmss, timezone: Europe/Malta}
+    wait_for_main_validation:
+      workflow: validate.yml
+      jobs: []
+    wait_for_workflows:
+      - workflow: release.yml
+        display_title_template: "Publish Pure {{tag}}"
+        timeout_minutes: 20
+
+upstreams:
+  - repo: sindresorhus/pure
+    ref: {kind: branch, name: main}
