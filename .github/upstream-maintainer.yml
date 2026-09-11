@@ -1,9 +1,9 @@
 version: 1
-$schema: https://raw.githubusercontent.com/SijanC147/pure-upstream-maintainer/main/schema/upstream-maintainer.schema.json
+$schema: https://raw.githubusercontent.com/SijanC147/upstream-maintainer/main/schema/upstream-maintainer.schema.json
 
 identity:
-  name: Pure Upstream Maintainer
-  email: pure-upstream-maintainer@users.noreply.github.com
+  name: Upstream Maintainer
+  email: upstream-maintainer@users.noreply.github.com
 
 concurrency:
   max_open_prs: 1
